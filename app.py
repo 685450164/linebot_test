@@ -1,8 +1,9 @@
 import os
 import json
 import requests
+import uvicorn
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 
 # ==================================================
 # Environment Variables
@@ -21,7 +22,7 @@ if not LINE_SECRET:
 # LINE API
 # ==================================================
 
-LINE_REPLY_ENDPOINT = "https://api.line.me/v2/bot/message/reply"
+line_reply_endpoint="https://api.line.me/v2/bot/message/reply"
 
 # ==================================================
 # FastAPI
@@ -29,71 +30,34 @@ LINE_REPLY_ENDPOINT = "https://api.line.me/v2/bot/message/reply"
 
 app = FastAPI()
 
-
 @app.get("/")
 async def root():
     return {
-        "status": "ok",
-        "version": "20260810"
+        "status":"ok",
     }
-
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
-
     payload = await request.json()
-
-    print("========== WEBHOOK ==========")
-    print(json.dumps(payload, ensure_ascii=False))
-
-    events = payload.get("events", [])
-
-    if not events:
-        return {"status": "no event"}
-
-    event = events[0]
-
-    if event.get("type") != "message":
-        return {"status": "ignore"}
-
-    if event["message"].get("type") != "text":
-        return {"status": "ignore"}
-
+    event = payload["events"][0] # 擷取payload 內的replyToken 和訊息
     reply_token = event["replyToken"]
-    user_text = event["message"]["text"]
-
-    reply_text = f"你剛剛說了：{user_text}"
-
+    message = event["message"]["text"]
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LINE_TOKEN}"
     }
-
     data = {
-        "replyToken": reply_token,
+        "replyToken": reply_token, # 需要有replyToken 才能回覆
         "messages": [
             {
                 "type": "text",
-                "text": reply_text
+                "text": f"重複⼀次：{message}",
             }
         ]
     }
-
-    response = requests.post(
-        LINE_REPLY_ENDPOINT,
-        headers=headers,
-        json=data
-    )
-
-    print("LINE Response:", response.status_code)
-    print(response.text)
-
-    return {"status": "success"}
-
+    requests.post(line_reply_endpoint, headers=headers, data=json.dumps(data))
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(
         app,
         host="0.0.0.0",

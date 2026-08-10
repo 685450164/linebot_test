@@ -62,7 +62,7 @@ async def handle_webhook(request: Request):
     reply_token = event["replyToken"]
     user_text = event["message"]["text"]
 
-    reply_text = f"你剛剛說：{user_text}"
+    reply_text = f"你剛剛說了：{user_text}"
 
     headers = {
         "Content-Type": "application/json",

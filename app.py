@@ -87,6 +87,8 @@ async def webhook(request: Request):
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
 
+    print("===== NEW VERSION =====")
+    
     user_text = event.message.text
 
     reply_text = f"你剛剛說：{user_text}"

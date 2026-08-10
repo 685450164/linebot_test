@@ -1,4 +1,5 @@
 python-dotenv
+fastapi
 flask
 line-bot-sdk
 lxml

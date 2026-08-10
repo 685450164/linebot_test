@@ -1,117 +1,101 @@
 import os
+import json
+import requests
+
 from fastapi import FastAPI, Request, HTTPException
-from linebot.v3 import WebhookHandler
-from linebot.v3.exceptions import InvalidSignatureError
 
-from linebot.v3.messaging import (
-    Configuration,
-    ApiClient,
-    MessagingApi,
-    ReplyMessageRequest,
-    TextMessage,
-)
+# ==================================================
+# Environment Variables
+# ==================================================
 
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+LINE_TOKEN = os.getenv("LINE_TOKEN")
+LINE_SECRET = os.getenv("LINE_SECRET")
 
+if not LINE_TOKEN:
+    raise ValueError("LINE_TOKEN not found")
 
-# =====================================
-# 讀取 Render Environment Variables
-# =====================================
+if not LINE_SECRET:
+    raise ValueError("LINE_SECRET not found")
 
-CHANNEL_ACCESS_TOKEN = os.getenv("LINE_TOKEN")
-CHANNEL_SECRET = os.getenv("LINE_SECRET")
+# ==================================================
+# LINE API
+# ==================================================
 
-if not CHANNEL_ACCESS_TOKEN:
-    raise ValueError("LINE_CHANNEL_ACCESS_TOKEN not found")
+LINE_REPLY_ENDPOINT = "https://api.line.me/v2/bot/message/reply"
 
-if not CHANNEL_SECRET:
-    raise ValueError("LINE_CHANNEL_SECRET not found")
-
-
-# =====================================
-# LINE SDK
-# =====================================
-
-configuration = Configuration(
-    access_token=CHANNEL_ACCESS_TOKEN
-)
-
-handler = WebhookHandler(CHANNEL_SECRET)
-
-
-# =====================================
+# ==================================================
 # FastAPI
-# =====================================
+# ==================================================
 
 app = FastAPI()
 
 
 @app.get("/")
 async def root():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": "20260810"
+    }
 
 
 @app.post("/webhook")
-async def webhook(request: Request):
+async def handle_webhook(request: Request):
 
-    signature = request.headers.get("X-Line-Signature")
-
-    if not signature:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing X-Line-Signature"
-        )
-
-    body = await request.body()
-    body_str = body.decode("utf-8")
+    payload = await request.json()
 
     print("========== WEBHOOK ==========")
-    print(body_str)
+    print(json.dumps(payload, ensure_ascii=False))
 
-    try:
-        handler.handle(body_str, signature)
+    events = payload.get("events", [])
 
-    except InvalidSignatureError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid Signature"
-        )
+    if not events:
+        return {"status": "no event"}
 
-    return {"status": "success"}
+    event = events[0]
 
+    if event.get("type") != "message":
+        return {"status": "ignore"}
 
-# =====================================
-# 收到文字訊息
-# =====================================
+    if event["message"].get("type") != "text":
+        return {"status": "ignore"}
 
-@handler.add(MessageEvent, message=TextMessageContent)
-def handle_message(event):
-
-    print("===== NEW VERSION =====")
-    
-    user_text = event.message.text
+    reply_token = event["replyToken"]
+    user_text = event["message"]["text"]
 
     reply_text = f"你剛剛說：{user_text}"
 
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}"
+    }
 
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[
-                    TextMessage(text=reply_text)
-                ]
-            )
-        )
+    data = {
+        "replyToken": reply_token,
+        "messages": [
+            {
+                "type": "text",
+                "text": reply_text
+            }
+        ]
+    }
+
+    response = requests.post(
+        LINE_REPLY_ENDPOINT,
+        headers=headers,
+        json=data
+    )
+
+    print("LINE Response:", response.status_code)
+    print(response.text)
+
+    return {"status": "success"}
 
 
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "app:app",
+        app,
         host="0.0.0.0",
-        port=5000,
-        reload=True
+        port=int(os.environ.get("PORT", 8000))
     )

@@ -1,72 +1,115 @@
 import os
-from dotenv import load_dotenv
-from flask import Flask, request, abort
-from linebot.v3.webhook import WebhookHandler, Event
+from fastapi import FastAPI, Request, HTTPException
+from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging.models import TextMessage
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import (
-    MessageEvent, 
-    TextMessage, 
-    TextSendMessage,
-    ImageSendMessage)
-from linebot.exceptions import InvalidSignatureError
-import logging
 
-# 加載 .env 文件中的變數
-load_dotenv()
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage,
+)
 
-# 從環境變數中讀取 LINE 的 Channel Access Token 和 Channel Secret
-line_token = os.getenv('LINE_TOKEN')
-line_secret = os.getenv('LINE_SECRET')
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-# 檢查是否設置了環境變數
-if not line_token or not line_secret:
-    print(f"LINE_TOKEN: {line_token}")  # 調試輸出
-    print(f"LINE_SECRET: {line_secret}")  # 調試輸出
-    raise ValueError("LINE_TOKEN 或 LINE_SECRET 未設置")
 
-# 初始化 LineBotApi 和 WebhookHandler
-line_bot_api = LineBotApi(line_token)
-handler = WebhookHandler(line_secret)
+# =====================================
+# 讀取 Render Environment Variables
+# =====================================
 
-# 創建 Flask 應用
-app = Flask(__name__)
+CHANNEL_ACCESS_TOKEN = os.getenv("LINE_TOKEN")
+CHANNEL_SECRET = os.getenv("LINE_SECRET")
 
-app.logger.setLevel(logging.DEBUG)
+if not CHANNEL_ACCESS_TOKEN:
+    raise ValueError("LINE_CHANNEL_ACCESS_TOKEN not found")
 
-# 設置一個路由來處理 LINE Webhook 的回調請求
-@app.route("/", methods=['POST'])
-def callback():
-    # 取得 X-Line-Signature 標頭
-    signature = request.headers['X-Line-Signature']
+if not CHANNEL_SECRET:
+    raise ValueError("LINE_CHANNEL_SECRET not found")
 
-    # 取得請求的原始內容
-    body = request.get_data(as_text=True)
-    app.logger.info(f"Request body: {body}")
 
-    # 驗證簽名並處理請求
+# =====================================
+# LINE SDK
+# =====================================
+
+configuration = Configuration(
+    access_token=CHANNEL_ACCESS_TOKEN
+)
+
+handler = WebhookHandler(CHANNEL_SECRET)
+
+
+# =====================================
+# FastAPI
+# =====================================
+
+app = FastAPI()
+
+
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
+
+    signature = request.headers.get("X-Line-Signature")
+
+    if not signature:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Line-Signature"
+        )
+
+    body = await request.body()
+    body_str = body.decode("utf-8")
+
+    print("========== WEBHOOK ==========")
+    print(body_str)
+
     try:
-        handler.handle(body, signature)
+        handler.handle(body_str, signature)
+
     except InvalidSignatureError:
-        abort(400)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Signature"
+        )
 
-    return 'OK'
+    return {"status": "success"}
 
-# 設置一個事件處理器來處理 TextMessage 事件
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event: Event):
-    if event.message.type == "text":
-        user_message = event.message.text  # 使用者的訊息
-        app.logger.info(f"收到的訊息: {user_message}")
 
-        # 使用 GPT 生成回應
-        reply_text = ("你說了：" + user_message)
+# =====================================
+# 收到文字訊息
+# =====================================
+
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle_message(event):
+
+    user_text = event.message.text
+
+    reply_text = f"你剛剛說：{user_text}"
+
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
 
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    TextMessage(text=reply_text)
+                ]
+            )
         )
-# 應用程序入口點
+
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    import uvicorn
+
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )
